@@ -146,6 +146,9 @@ def test_config():
     print(f"✅ PROJECTS_DIR: {settings.PROJECTS_DIR}")
 
 
+import pytest
+
+@pytest.mark.asyncio
 async def test_github_search():
     """Test GitHub search (requires network)."""
     print("\n" + "="*50)

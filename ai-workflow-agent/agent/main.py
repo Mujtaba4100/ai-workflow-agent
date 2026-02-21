@@ -2,6 +2,7 @@
 """
 Main FastAPI application for the AI Workflow Agent.
 Provides endpoints for natural language workflow generation.
+Milestone 1: Added chat interface and session management.
 """
 
 from fastapi import FastAPI, HTTPException
@@ -16,6 +17,8 @@ from tools.github_search import GitHubSearchTool
 from tools.n8n_builder import N8NWorkflowBuilder
 from tools.comfyui_builder import ComfyUIWorkflowBuilder
 from tools.docker_helper import DockerHelper
+from tools.web_search import WebSearchTool
+from chat_handler import chat_handler
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -25,7 +28,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="AI Workflow Agent",
     description="Intelligent assistant for creating n8n, ComfyUI, and hybrid workflows",
-    version="0.1.0"
+    version="1.0.0"  # Milestone 1
 )
 
 # Add CORS middleware
@@ -43,6 +46,7 @@ github_tool = GitHubSearchTool()
 n8n_builder = N8NWorkflowBuilder()
 comfyui_builder = ComfyUIWorkflowBuilder()
 docker_helper = DockerHelper()
+web_search = WebSearchTool()
 
 
 # ============================================
@@ -275,6 +279,202 @@ async def execute_comfyui(workflow: Dict[str, Any]):
         return {"success": True, "result": result}
     except Exception as e:
         logger.error(f"ComfyUI execute error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
+# Chat Endpoints (Milestone 1)
+# ============================================
+
+class ChatRequest(BaseModel):
+    """Chat request model."""
+    message: str
+    session_id: Optional[str] = None
+
+
+class ChatResponse(BaseModel):
+    """Chat response model."""
+    success: bool
+    session_id: str
+    response: str
+    state: str
+    project_type: Optional[str] = None
+    workflow: Optional[Dict[str, Any]] = None
+    needs_clarification: Optional[bool] = False
+    questions: Optional[List[str]] = None
+
+
+class WebSearchRequest(BaseModel):
+    """Web search request model."""
+    query: str
+    max_results: int = 5
+    site_filter: Optional[str] = None
+
+
+@app.post("/chat", response_model=ChatResponse)
+async def chat(request: ChatRequest):
+    """
+    Conversational interface for workflow generation.
+    
+    Supports multi-turn conversations with session management.
+    The agent will ask clarifying questions if needed.
+    
+    Example:
+    ```
+    POST /chat
+    {"message": "Create an automation that sends Slack notifications"}
+    ```
+    """
+    try:
+        result = await chat_handler.chat(
+            message=request.message,
+            session_id=request.session_id
+        )
+        return ChatResponse(**result)
+    except Exception as e:
+        logger.error(f"Chat error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/chat/sessions")
+async def list_chat_sessions():
+    """List all active chat sessions."""
+    return {
+        "sessions": chat_handler.list_sessions()
+    }
+
+
+@app.get("/chat/session/{session_id}")
+async def get_chat_session(session_id: str):
+    """Get details of a specific chat session."""
+    session = chat_handler.get_session_info(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session
+
+
+@app.delete("/chat/session/{session_id}")
+async def delete_chat_session(session_id: str):
+    """Delete a chat session."""
+    if chat_handler.clear_session(session_id):
+        return {"success": True, "message": f"Session {session_id} deleted"}
+    raise HTTPException(status_code=404, detail="Session not found")
+
+
+# ============================================
+# Web Search Endpoints (Milestone 1)
+# ============================================
+
+@app.post("/search/web")
+async def search_web(request: WebSearchRequest):
+    """
+    Search the web for relevant information.
+    
+    Useful for finding tools, documentation, and alternatives.
+    """
+    try:
+        result = await web_search.search_with_summary(
+            query=request.query,
+            max_results=request.max_results
+        )
+        return {"success": True, **result}
+    except Exception as e:
+        logger.error(f"Web search error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/search/projects")
+async def search_projects(request: WebSearchRequest):
+    """
+    Search for GitHub projects related to a query.
+    
+    Combines GitHub API search with web search for better coverage.
+    """
+    try:
+        # Search GitHub API
+        github_results = await github_tool.search(
+            request.query,
+            max_results=request.max_results
+        )
+        
+        # Generate recommendation
+        recommendation = await github_tool.generate_recommendation(github_results)
+        
+        return {
+            "success": True,
+            "repositories": github_results,
+            "recommendation": recommendation
+        }
+    except Exception as e:
+        logger.error(f"Project search error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/search/alternatives")
+async def search_alternatives(tool: str, purpose: str):
+    """
+    Find alternative tools for a specific purpose.
+    
+    Example: Find alternatives to Zapier for automation
+    """
+    try:
+        results = await web_search.find_alternatives(tool, purpose)
+        return {
+            "success": True,
+            "tool": tool,
+            "purpose": purpose,
+            "alternatives": results
+        }
+    except Exception as e:
+        logger.error(f"Alternatives search error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
+# Enhanced Docker Endpoints (Milestone 1)
+# ============================================
+
+@app.get("/docker/containers")
+async def list_docker_containers(all_containers: bool = False):
+    """List Docker containers."""
+    try:
+        containers = await docker_helper.list_containers(all_containers)
+        return {"success": True, "containers": containers}
+    except Exception as e:
+        logger.error(f"List containers error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/docker/logs/{container_id}")
+async def get_container_logs(container_id: str, lines: int = 100):
+    """Get logs from a Docker container."""
+    try:
+        logs = await docker_helper.get_container_logs(container_id, lines)
+        return {"success": True, "container_id": container_id, "logs": logs}
+    except Exception as e:
+        logger.error(f"Get logs error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/docker/stop/{container_id}")
+async def stop_docker_container(container_id: str):
+    """Stop a running Docker container."""
+    try:
+        success = await docker_helper.stop_container(container_id)
+        return {"success": success, "container_id": container_id}
+    except Exception as e:
+        logger.error(f"Stop container error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/docker/container/{container_id}")
+async def remove_docker_container(container_id: str):
+    """Remove a Docker container."""
+    try:
+        success = await docker_helper.remove_container(container_id)
+        return {"success": success, "container_id": container_id}
+    except Exception as e:
+        logger.error(f"Remove container error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
