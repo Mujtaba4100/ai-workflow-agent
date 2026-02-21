@@ -1,0 +1,140 @@
+# AI Workflow Agent - Docker Compose
+# Phase 0: Base Environment Setup
+# Services: n8n, ComfyUI, Ollama, Portainer, Agent
+
+version: '3.8'
+
+services:
+  # ============================================
+  # OLLAMA - Local LLM Server
+  # ============================================
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # ============================================
+  # N8N - Workflow Automation
+  # ============================================
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./workflows:/home/node/workflows
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=false
+      - N8N_HOST=0.0.0.0
+      - WEBHOOK_URL=http://localhost:5678/
+      - GENERIC_TIMEZONE=UTC
+    restart: unless-stopped
+    depends_on:
+      - ollama
+
+  # ============================================
+  # COMFYUI - Generative AI Workflows
+  # ============================================
+  comfyui:
+    image: yanwk/comfyui-boot:latest
+    container_name: comfyui
+    ports:
+      - "8188:8188"
+    volumes:
+      - comfyui_data:/home/runner
+      - ./comfyui_workflows:/home/runner/ComfyUI/user/default/workflows
+    environment:
+      - CLI_ARGS=--listen 0.0.0.0
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # ============================================
+  # PORTAINER - Docker Management Dashboard
+  # ============================================
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    ports:
+      - "9000:9000"
+      - "9443:9443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+    restart: unless-stopped
+
+  # ============================================
+  # POSTGRESQL - Database
+  # ============================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=agent
+      - POSTGRES_PASSWORD=agent_secret_2026
+      - POSTGRES_DB=workflow_agent
+    restart: unless-stopped
+
+  # ============================================
+  # AGENT SERVICE - AI Decision Agent (CrewAI)
+  # ============================================
+  agent:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile
+    container_name: ai_agent
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./agent:/app
+      - ./workflows:/app/workflows
+      - ./projects:/app/projects
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+      - N8N_HOST=http://n8n:5678
+      - COMFYUI_HOST=http://comfyui:8188
+      - POSTGRES_HOST=postgres
+      - POSTGRES_USER=agent
+      - POSTGRES_PASSWORD=agent_secret_2026
+      - POSTGRES_DB=workflow_agent
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      - ollama
+      - n8n
+      - comfyui
+      - postgres
+    restart: unless-stopped
+
+volumes:
+  ollama_data:
+  n8n_data:
+  comfyui_data:
+  portainer_data:
+  postgres_data:
+
+networks:
+  default:
+    name: ai_workflow_network

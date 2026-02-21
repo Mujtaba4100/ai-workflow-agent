@@ -1,0 +1,144 @@
+# ============================================
+# Python
+# ============================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ============================================
+# Virtual Environments
+# ============================================
+.venv
+.env
+.env.local
+.env.*.local
+
+# ============================================
+# IDE / Editor
+# ============================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
+.atom/
+.pylintrc
+.mypy.ini
+
+# ============================================
+# Project-Specific
+# ============================================
+# Generated workflows and projects
+workflows/*.json
+projects/*/
+!projects/.gitkeep
+
+# Docker volumes and data
+postgres_data/
+ollama_data/
+n8n_data/
+comfyui_data/
+portainer_data/
+
+# Logs
+*.log
+logs/
+*.bak
+*.tmp
+
+# ============================================
+# Sensitive Data
+# ============================================
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+credentials.json
+secrets/
+
+# ============================================
+# Node / npm (for frontend if added)
+# ============================================
+node_modules/
+package-lock.json
+yarn.lock
+.npm
+dist/
+
+# ============================================
+# OS Specific
+# ============================================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ============================================
+# Git
+# ============================================
+*.orig
+
+# ============================================
+# Testing
+# ============================================
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+
+# ============================================
+# Database
+# ============================================
+*.db
+*.sqlite
+*.sqlite3
+.pgdata/
+
+# ============================================
+# Temporary Files
+# ============================================
+temp/
+tmp/
+*.temp
+*.tmp
+.cache/
+
+# ============================================
+# IDE Python configs
+# ============================================
+.pylintrc
+setup.cfg
+tox.ini
