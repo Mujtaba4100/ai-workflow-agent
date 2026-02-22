@@ -33,7 +33,7 @@ class ComfyUIWorkflowBuilder:
                 return "healthy"
             return "unhealthy"
         except Exception as e:
-            logger.error(f"ComfyUI health check failed: {e}")
+            logger.debug(f"ComfyUI health check failed: {e}")
             return "unreachable"
     
     async def generate_workflow(self, query: str) -> Dict[str, Any]:

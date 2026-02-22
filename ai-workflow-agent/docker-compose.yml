@@ -2,8 +2,6 @@
 # Phase 0: Base Environment Setup
 # Services: n8n, ComfyUI, Ollama, Portainer, Agent
 
-version: '3.8'
-
 services:
   # ============================================
   # OLLAMA - Local LLM Server
@@ -48,25 +46,27 @@ services:
 
   # ============================================
   # COMFYUI - Generative AI Workflows
+  # Note: Using CPU-only lightweight image for testing
   # ============================================
   comfyui:
-    image: yanwk/comfyui-boot:latest
+    image: pytorch/pytorch:2.0.0-cuda11.7-cudnn8-runtime
     container_name: comfyui
     ports:
       - "8188:8188"
     volumes:
-      - comfyui_data:/home/runner
-      - ./comfyui_workflows:/home/runner/ComfyUI/user/default/workflows
-    environment:
-      - CLI_ARGS=--listen 0.0.0.0
+      - comfyui_data:/workspace
+      - ./comfyui_workflows:/workspace/workflows
+    working_dir: /workspace
+    command: >
+      bash -c "
+      apt-get update && apt-get install -y git &&
+      if [ ! -d ComfyUI ]; then
+        git clone https://github.com/comfyanonymous/ComfyUI.git &&
+        cd ComfyUI && pip install -r requirements.txt;
+      fi &&
+      cd ComfyUI && python main.py --listen 0.0.0.0 --port 8188
+      "
     restart: unless-stopped
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
 
   # ============================================
   # PORTAINER - Docker Management Dashboard

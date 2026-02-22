@@ -37,7 +37,7 @@ class DecisionAgent:
                 return "healthy"
             return "unhealthy"
         except Exception as e:
-            logger.error(f"Ollama health check failed: {e}")
+            logger.debug(f"Ollama health check failed: {e}")
             return "unreachable"
     
     async def ensure_model_available(self) -> bool:
@@ -61,7 +61,7 @@ class DecisionAgent:
                 return True
             return False
         except Exception as e:
-            logger.error(f"Model check failed: {e}")
+            logger.debug(f"Model check failed: {e}")
             return False
     
     async def analyze(self, query: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -177,7 +177,7 @@ Remember: Respond ONLY with valid JSON."""
                         "explanation": "LLM response parsing failed"
                     }
             else:
-                logger.error(f"Ollama request failed: {response.status_code}")
+                logger.debug(f"Ollama request failed: {response.status_code}")
                 return {
                     "project_type": ProjectType.UNKNOWN,
                     "confidence": 0.0,
@@ -185,7 +185,7 @@ Remember: Respond ONLY with valid JSON."""
                 }
                 
         except Exception as e:
-            logger.error(f"LLM analysis error: {e}")
+            logger.debug(f"LLM analysis error: {e}")
             return {
                 "project_type": ProjectType.UNKNOWN,
                 "confidence": 0.0,
