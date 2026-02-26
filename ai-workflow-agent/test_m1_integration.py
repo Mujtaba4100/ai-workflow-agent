@@ -9,10 +9,12 @@ import httpx
 import json
 import sys
 import os
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "agent"))
 
 
+@pytest.mark.asyncio
 async def test_api_server():
     """Test FastAPI server basics."""
     print("\n" + "="*60)
@@ -38,6 +40,7 @@ async def test_api_server():
         print(f"  {status} {route}")
 
 
+@pytest.mark.asyncio
 async def test_session_management():
     """Test session management."""
     print("\n" + "="*60)
@@ -81,6 +84,7 @@ async def test_session_management():
     print(f"✅ Active sessions: {len(all_sessions)}")
 
 
+@pytest.mark.asyncio
 async def test_web_search():
     """Test web search tool."""
     print("\n" + "="*60)
@@ -110,6 +114,7 @@ async def test_web_search():
         print(f"⚠️  Search test skipped: {e}")
 
 
+@pytest.mark.asyncio
 async def test_workflow_generation():
     """Test workflow template generation."""
     print("\n" + "="*60)
@@ -150,6 +155,7 @@ async def test_workflow_generation():
         print(f"✅ ComfyUI: '{query[:30]}...' → {len(workflow)} nodes")
 
 
+@pytest.mark.asyncio
 async def test_template_library():
     """Test comprehensive template libraries."""
     print("\n" + "="*60)
@@ -184,6 +190,7 @@ async def test_template_library():
     print(f"✅ ComfyUI template generation works")
 
 
+@pytest.mark.asyncio
 async def test_github_search():
     """Test GitHub search tool."""
     print("\n" + "="*60)
@@ -206,6 +213,7 @@ async def test_github_search():
         print(f"⚠️  GitHub search test skipped: {e}")
 
 
+@pytest.mark.asyncio
 async def test_docker_helper():
     """Test Docker helper (local only, no daemon required)."""
     print("\n" + "="*60)
@@ -225,6 +233,7 @@ async def test_docker_helper():
         print(f"⚠️  Docker not running (expected): {str(e)[:50]}")
 
 
+@pytest.mark.asyncio
 async def test_decision_agent():
     """Test decision agent logic."""
     print("\n" + "="*60)

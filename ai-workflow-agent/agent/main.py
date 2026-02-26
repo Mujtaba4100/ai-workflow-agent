@@ -28,6 +28,12 @@ from webhook_receiver import get_webhook_receiver, WebhookSource
 from notifications import get_notification_manager, NotificationType, NotificationPriority
 from storage import get_storage
 
+# M3 imports
+from colab_connector import get_colab_connector, ColabTaskType
+from workflow_builder import get_workflow_builder, get_node_registry, NodeCategory
+from project_templates import get_template_registry, get_scaffolder, ProjectCategory
+from assistant_enhanced import get_assistant, QuickAction
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -36,7 +42,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="AI Workflow Agent",
     description="Intelligent assistant for creating n8n, ComfyUI, and hybrid workflows",
-    version="2.0.0"  # Milestone 2
+    version="3.0.0"  # Milestone 3
 )
 
 # Add CORS middleware
@@ -62,6 +68,14 @@ workflow_monitor = get_monitor()
 webhook_receiver = get_webhook_receiver()
 notification_manager = get_notification_manager()
 storage = get_storage()
+
+# M3 components (lazy-loaded singletons)
+colab_connector = get_colab_connector()
+workflow_builder = get_workflow_builder()
+node_registry = get_node_registry()
+template_registry = get_template_registry()
+project_scaffolder = get_scaffolder()
+enhanced_assistant = get_assistant()
 
 
 # ============================================
@@ -1015,13 +1029,514 @@ async def get_all_settings():
 
 
 # ============================================
+# Colab Integration Endpoints (Milestone 3)
+# ============================================
+
+class ColabTaskRequest(BaseModel):
+    """Request to create a Colab task."""
+    task_type: str  # image_generation, llm_inference, model_training, video_generation
+    prompt: Optional[str] = None
+    model_name: Optional[str] = None
+    parameters: Optional[Dict[str, Any]] = None
+    callback_url: Optional[str] = None
+
+
+@app.post("/colab/task")
+async def create_colab_task(request: ColabTaskRequest):
+    """
+    Create a heavy computation task for Google Colab.
+    
+    Generates a notebook to run on Colab with callbacks.
+    """
+    try:
+        task_type = ColabTaskType(request.task_type)
+        
+        # Build parameters dict from request
+        parameters = request.parameters or {}
+        if request.prompt:
+            parameters["prompt"] = request.prompt
+        if request.model_name:
+            parameters["model"] = request.model_name
+        if request.callback_url:
+            parameters["callback_url"] = request.callback_url
+        
+        task = colab_connector.create_task(
+            task_type=task_type,
+            parameters=parameters
+        )
+        
+        return {
+            "success": True,
+            "task": task.to_dict(),
+            "notebook_download": f"/colab/notebook/{task.task_id}"
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid task type: {str(e)}")
+    except Exception as e:
+        logger.error(f"Colab task error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/colab/notebook/{task_id}")
+async def get_colab_notebook(task_id: str):
+    """
+    Get the generated Colab notebook for a task.
+    
+    Download this and upload to Google Colab.
+    """
+    notebook = colab_connector.get_notebook(task_id)
+    if not notebook:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return notebook
+
+
+@app.get("/colab/task/{task_id}")
+async def get_colab_task_status(task_id: str):
+    """Get status of a Colab task."""
+    task = colab_connector.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {"success": True, "task": task.to_dict()}
+
+
+@app.post("/colab/callback/{task_id}")
+async def colab_callback(task_id: str, request: Request):
+    """
+    Callback endpoint for Colab notebook results.
+    
+    The notebook calls this when processing completes.
+    """
+    try:
+        payload = await request.json()
+        result = await colab_connector.process_callback(task_id, payload)
+        
+        # Notify completion
+        await notification_manager.notify(
+            title="Colab Task Completed",
+            message=f"Task {task_id} finished processing",
+            notification_type=NotificationType.SUCCESS,
+            data={"task_id": task_id, "result": result}
+        )
+        
+        return {"success": True, "processed": True, "result": result}
+    except Exception as e:
+        logger.error(f"Colab callback error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/colab/tasks")
+async def list_colab_tasks(status: Optional[str] = None, limit: int = 50):
+    """List all Colab tasks with optional status filter."""
+    tasks = colab_connector.list_tasks(status=status, limit=limit)
+    return {
+        "success": True,
+        "count": len(tasks),
+        "tasks": [t.to_dict() for t in tasks]
+    }
+
+
+@app.get("/colab/stats")
+async def get_colab_stats():
+    """Get Colab task statistics."""
+    return {
+        "success": True,
+        "stats": colab_connector.get_stats()
+    }
+
+
+@app.delete("/colab/task/{task_id}")
+async def cancel_colab_task(task_id: str):
+    """Cancel a pending Colab task."""
+    if not colab_connector.cancel_task(task_id):
+        raise HTTPException(status_code=404, detail="Task not found or not cancelable")
+    return {"success": True, "message": f"Task {task_id} cancelled"}
+
+
+# ============================================
+# Visual Workflow Builder Endpoints (Milestone 3)
+# ============================================
+
+class CreateNodeRequest(BaseModel):
+    """Request to add a node to visual workflow."""
+    workflow_id: str
+    node_type: str
+    position_x: float = 0
+    position_y: float = 0
+    config: Optional[Dict[str, Any]] = None
+
+
+class ConnectNodesRequest(BaseModel):
+    """Request to connect two nodes."""
+    workflow_id: str
+    from_node_id: str
+    from_port: str
+    to_node_id: str
+    to_port: str
+
+
+class ExportWorkflowRequest(BaseModel):
+    """Request to export visual workflow."""
+    workflow_id: str
+    format: str = "n8n"  # n8n or comfyui
+
+
+@app.post("/builder/workflow")
+async def create_visual_workflow(name: str = "New Workflow", description: str = ""):
+    """Create a new visual workflow canvas."""
+    workflow = workflow_builder.create_workflow(name=name, description=description)
+    return {
+        "success": True,
+        "workflow": workflow.to_dict()
+    }
+
+
+@app.get("/builder/workflow/{workflow_id}")
+async def get_visual_workflow(workflow_id: str):
+    """Get a visual workflow by ID."""
+    workflow = workflow_builder.get_workflow(workflow_id)
+    if not workflow:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    return {"success": True, "workflow": workflow.to_dict()}
+
+
+@app.post("/builder/node")
+async def add_node_to_workflow(request: CreateNodeRequest):
+    """Add a node to a visual workflow."""
+    try:
+        workflow = workflow_builder.get_workflow(request.workflow_id)
+        if not workflow:
+            raise HTTPException(status_code=404, detail="Workflow not found")
+        
+        node = workflow_builder.add_node(
+            workflow_id=request.workflow_id,
+            node_type=request.node_type,
+            position={"x": request.position_x, "y": request.position_y},
+            properties=request.config
+        )
+        
+        if not node:
+            raise HTTPException(status_code=400, detail="Failed to add node - unknown node type")
+        
+        return {
+            "success": True,
+            "node": node.to_dict()
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Add node error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/builder/connect")
+async def connect_workflow_nodes(request: ConnectNodesRequest):
+    """Connect two nodes in a visual workflow."""
+    try:
+        workflow = workflow_builder.get_workflow(request.workflow_id)
+        if not workflow:
+            raise HTTPException(status_code=404, detail="Workflow not found")
+        
+        connection = workflow_builder.add_connection(
+            workflow_id=request.workflow_id,
+            source_node=request.from_node_id,
+            source_port=request.from_port,
+            target_node=request.to_node_id,
+            target_port=request.to_port
+        )
+        
+        if not connection:
+            raise HTTPException(status_code=400, detail="Failed to connect nodes")
+        
+        return {
+            "success": True,
+            "connection": connection.to_dict()
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Connect nodes error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/builder/node/{workflow_id}/{node_id}")
+async def remove_node_from_workflow(workflow_id: str, node_id: str):
+    """Remove a node from a visual workflow."""
+    workflow = workflow_builder.get_workflow(workflow_id)
+    if not workflow:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    
+    if not workflow_builder.remove_node(workflow_id, node_id):
+        raise HTTPException(status_code=404, detail="Node not found")
+    
+    return {"success": True, "message": f"Node {node_id} removed"}
+
+
+@app.post("/builder/validate/{workflow_id}")
+async def validate_visual_workflow(workflow_id: str):
+    """Validate a visual workflow for errors."""
+    workflow = workflow_builder.get_workflow(workflow_id)
+    if not workflow:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    
+    result = workflow_builder.validate_workflow(workflow_id)
+    return {
+        "success": True,
+        "valid": result.get("valid", False),
+        "errors": result.get("errors", []),
+        "warnings": result.get("warnings", [])
+    }
+
+
+@app.post("/builder/export")
+async def export_visual_workflow(request: ExportWorkflowRequest):
+    """Export visual workflow to n8n or ComfyUI format."""
+    workflow = workflow_builder.get_workflow(request.workflow_id)
+    if not workflow:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    
+    try:
+        exported = workflow_builder.export_workflow(request.workflow_id, format=request.format)
+        return {
+            "success": True,
+            "format": request.format,
+            "workflow": exported
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/builder/nodes")
+async def list_available_nodes(category: Optional[str] = None):
+    """List all available node types for the visual builder."""
+    if category:
+        try:
+            cat = NodeCategory(category)
+            nodes = node_registry.get_by_category(cat)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid category: {category}")
+    else:
+        nodes = node_registry.list_all()
+    
+    return {
+        "success": True,
+        "count": len(nodes),
+        "nodes": [n.to_dict() for n in nodes]
+    }
+
+
+@app.get("/builder/nodes/categories")
+async def list_node_categories():
+    """List all node categories."""
+    return {
+        "success": True,
+        "categories": [c.value for c in NodeCategory]
+    }
+
+
+@app.get("/builder/workflows")
+async def list_visual_workflows():
+    """List all visual workflows."""
+    workflows = workflow_builder.list_workflows()
+    return {
+        "success": True,
+        "count": len(workflows),
+        "workflows": [w.to_dict() for w in workflows]
+    }
+
+
+# ============================================
+# Project Templates Endpoints (Milestone 3)
+# ============================================
+
+class ScaffoldProjectRequest(BaseModel):
+    """Request to scaffold a new project from template."""
+    template_id: str
+    project_name: str
+    output_dir: str = "./projects"
+    variables: Optional[Dict[str, str]] = None
+
+
+@app.get("/templates")
+async def list_project_templates(category: Optional[str] = None):
+    """List all available project templates."""
+    if category:
+        try:
+            cat = ProjectCategory(category)
+            templates = template_registry.list_by_category(cat)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid category: {category}")
+    else:
+        templates = template_registry.list_all()
+    
+    return {
+        "success": True,
+        "count": len(templates),
+        "templates": [t.to_dict() for t in templates]
+    }
+
+
+@app.get("/templates/{template_id}")
+async def get_template_details(template_id: str):
+    """Get detailed information about a template."""
+    template = template_registry.get(template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return {"success": True, "template": template.to_dict()}
+
+
+@app.get("/templates/{template_id}/preview")
+async def preview_template(template_id: str):
+    """Preview template files without creating."""
+    preview = project_scaffolder.preview(template_id)
+    if not preview.get("success"):
+        raise HTTPException(status_code=404, detail=preview.get("error", "Template not found"))
+    return preview
+
+
+@app.post("/templates/scaffold")
+async def scaffold_project(request: ScaffoldProjectRequest):
+    """
+    Create a new project from a template.
+    
+    Generates all template files with variable substitution.
+    """
+    result = project_scaffolder.scaffold(
+        template_id=request.template_id,
+        project_name=request.project_name,
+        output_dir=request.output_dir,
+        variables=request.variables
+    )
+    
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Scaffold failed"))
+    
+    # Notify about project creation
+    await notification_manager.notify(
+        title="Project Created",
+        message=f"Created project '{request.project_name}' from template '{request.template_id}'",
+        notification_type=NotificationType.SUCCESS,
+        data=result
+    )
+    
+    return {"success": True, **result}
+
+
+@app.get("/templates/search")
+async def search_templates(query: str):
+    """Search templates by name, description, or tags."""
+    templates = template_registry.search(query)
+    return {
+        "success": True,
+        "query": query,
+        "count": len(templates),
+        "templates": [t.to_dict() for t in templates]
+    }
+
+
+@app.get("/templates/categories")
+async def list_template_categories():
+    """List all template categories."""
+    return {
+        "success": True,
+        "categories": [c.value for c in ProjectCategory]
+    }
+
+
+# ============================================
+# Enhanced Assistant Endpoints (Milestone 3)
+# ============================================
+
+class AssistantChatRequest(BaseModel):
+    """Request to chat with enhanced assistant."""
+    message: str
+
+
+@app.post("/assistant/chat")
+async def assistant_chat(request: AssistantChatRequest):
+    """
+    Chat with the enhanced AI assistant.
+    
+    Provides intent detection, action suggestions, and context-aware responses.
+    """
+    try:
+        result = enhanced_assistant.process_message(request.message)
+        return {
+            "success": True,
+            **result
+        }
+    except Exception as e:
+        logger.error(f"Assistant chat error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/assistant/context")
+async def get_assistant_context():
+    """Get current assistant conversation context and state."""
+    return {
+        "success": True,
+        "state": enhanced_assistant.get_state()
+    }
+
+
+@app.delete("/assistant/context")
+async def clear_assistant_context():
+    """Clear assistant conversation history."""
+    enhanced_assistant.clear_context()
+    return {"success": True, "message": "Context cleared"}
+
+
+@app.get("/assistant/quick-actions")
+async def get_quick_actions():
+    """Get available quick actions."""
+    return {
+        "success": True,
+        "actions": QuickAction.get_all()
+    }
+
+
+@app.get("/assistant/quick-actions/{action_id}")
+async def get_quick_action(action_id: str):
+    """Get a specific quick action."""
+    action = QuickAction.get_action(action_id)
+    if not action:
+        raise HTTPException(status_code=404, detail="Action not found")
+    return {"success": True, "action": action}
+
+
+# ============================================
+# Combined M3 Dashboard Endpoint
+# ============================================
+
+@app.get("/m3/dashboard")
+async def get_m3_dashboard():
+    """
+    Get combined Milestone 3 dashboard data.
+    
+    Includes Colab stats, workflow builder state, templates, and assistant context.
+    """
+    return {
+        "success": True,
+        "colab": colab_connector.get_stats(),
+        "builder": {
+            "workflow_count": len(workflow_builder.list_workflows()),
+            "available_nodes": len(node_registry.list_all())
+        },
+        "templates": {
+            "count": len(template_registry.list_all()),
+            "categories": [c.value for c in ProjectCategory]
+        },
+        "assistant": enhanced_assistant.get_state()
+    }
+
+
+# ============================================
 # Startup/Shutdown Events
 # ============================================
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on startup."""
-    logger.info("Starting AI Workflow Agent v2.0.0 (M2)...")
+    logger.info("Starting AI Workflow Agent v3.0.0 (M3)...")
     logger.info(f"Ollama: {settings.OLLAMA_HOST}")
     logger.info(f"n8n: {settings.N8N_HOST}")
     logger.info(f"ComfyUI: {settings.COMFYUI_HOST}")
@@ -1033,10 +1548,14 @@ async def startup_event():
     await workflow_monitor.start_monitoring(interval=60)
     logger.info("Workflow monitoring started")
     
-    # M2 initialization notification
+    # M3 initialization
+    logger.info(f"Loaded {len(node_registry.list_all())} node types for visual builder")
+    logger.info(f"Loaded {len(template_registry.list_all())} project templates")
+    
+    # M3 initialization notification
     await notification_manager.notify(
         title="System Started",
-        message="AI Workflow Agent v2.0.0 is ready",
+        message="AI Workflow Agent v3.0.0 is ready with Colab, Builder, Templates, and Enhanced Assistant",
         notification_type=NotificationType.SYSTEM
     )
 

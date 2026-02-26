@@ -6,6 +6,7 @@ Tests for workflow execution, monitoring, webhooks, notifications, and storage
 import sys
 import os
 import asyncio
+import pytest
 from datetime import datetime
 
 # Add agent directory to path
@@ -27,6 +28,7 @@ def print_result(name: str, success: bool, details: str = ""):
         print(f"   {details}")
 
 
+@pytest.mark.asyncio
 async def test_workflow_executor():
     """Test the workflow executor."""
     print_header("Testing Workflow Executor")
@@ -101,6 +103,7 @@ async def test_workflow_executor():
     return True
 
 
+@pytest.mark.asyncio
 async def test_persistent_storage():
     """Test the persistent storage."""
     print_header("Testing Persistent Storage")
@@ -170,6 +173,7 @@ async def test_persistent_storage():
     return True
 
 
+@pytest.mark.asyncio
 async def test_webhook_receiver():
     """Test the webhook receiver."""
     print_header("Testing Webhook Receiver")
@@ -221,6 +225,7 @@ async def test_webhook_receiver():
     return True
 
 
+@pytest.mark.asyncio
 async def test_notification_system():
     """Test the notification system."""
     print_header("Testing Notification System")
@@ -290,6 +295,7 @@ async def test_notification_system():
     return True
 
 
+@pytest.mark.asyncio
 async def test_workflow_monitor():
     """Test the workflow monitor."""
     print_header("Testing Workflow Monitor")
@@ -341,6 +347,7 @@ async def test_workflow_monitor():
     return True
 
 
+@pytest.mark.asyncio
 async def test_api_imports():
     """Test that all M2 imports work in main.py."""
     print_header("Testing API Imports")
