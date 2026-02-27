@@ -92,11 +92,85 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./init-postgres.sh:/docker-entrypoint-initdb.d/init-postgres.sh
     environment:
       - POSTGRES_USER=agent
       - POSTGRES_PASSWORD=agent_secret_2026
       - POSTGRES_DB=workflow_agent
+      - POSTGRES_MULTIPLE_DATABASES=directus
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ============================================
+  # DIRECTUS - Headless CMS & Data Storage (M3)
+  # ============================================
+  directus:
+    image: directus/directus:latest
+    container_name: directus
+    ports:
+      - "8055:8055"
+    volumes:
+      - directus_uploads:/directus/uploads
+      - directus_extensions:/directus/extensions
+    environment:
+      KEY: 255d861b-5ea1-5996-9aa3-922530ec40b1
+      SECRET: 6116487b-cda1-52c2-b5b5-c8022c45e263
+      ADMIN_EMAIL: admin@example.com
+      ADMIN_PASSWORD: directus2026
+      DB_CLIENT: postgres
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: directus
+      DB_USER: agent
+      DB_PASSWORD: agent_secret_2026
+      CORS_ENABLED: "true"
+      CORS_ORIGIN: "*"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ============================================
+  # APPSMITH - Visual Dashboard Builder (M3)
+  # ============================================
+  appsmith:
+    image: appsmith/appsmith-ce:latest
+    container_name: appsmith
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - appsmith_data:/appsmith-stacks
+    environment:
+      - APPSMITH_ENCRYPTION_PASSWORD=appsmith_secret_2026
+      - APPSMITH_ENCRYPTION_SALT=appsmith_salt_2026
+      - APPSMITH_SUPERVISOR_PASSWORD=appsmith_supervisor
+      - APPSMITH_DISABLE_TELEMETRY=true
+    restart: unless-stopped
+
+  # ============================================
+  # MONGODB - Database for Appsmith
+  # ============================================
+  mongo:
+    image: mongo:6.0
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      - MONGO_INITDB_DATABASE=appsmith
+    command: mongod --noauth
+    restart: unless-stopped
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # ============================================
   # AGENT SERVICE - AI Decision Agent (CrewAI)
@@ -120,12 +194,16 @@ services:
       - POSTGRES_USER=agent
       - POSTGRES_PASSWORD=agent_secret_2026
       - POSTGRES_DB=workflow_agent
+      - DIRECTUS_URL=http://directus:8055
+      - APPSMITH_URL=http://appsmith:80
       - PYTHONUNBUFFERED=1
     depends_on:
       - ollama
       - n8n
       - comfyui
       - postgres
+      - directus
+      - appsmith
     restart: unless-stopped
 
 volumes:
@@ -134,6 +212,10 @@ volumes:
   comfyui_data:
   portainer_data:
   postgres_data:
+  directus_uploads:
+  directus_extensions:
+  appsmith_data:
+  mongo_data:
 
 networks:
   default:
